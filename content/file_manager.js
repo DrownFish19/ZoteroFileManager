@@ -36,22 +36,28 @@ if (!ZoteroFileManager.Logic) {
         },
 
         runScan: async function () {
-            Zotero.showZoteroPaneProgressMeter("Scanning Library...");
+            // Zotero 7 has a new progress meter API, trying to be compatible or use a simpler approach
+            let progressWin = new Zotero.ProgressWindow();
+            progressWin.changeHeadline("Scanning Library...");
+            progressWin.show();
+            let progressItem = new progressWin.ItemProgress("icon-wait", "Checking files...");
             
             try {
                 await this.checkMissingLinks();
-                await this.checkDuplicates();
+                await this.checkDuplicates(progressItem);
+                progressItem.setText("Scan complete.");
+                // progressItem.setIcon("icon-ok"); // Method not available
+                progressWin.startCloseTimer(3000);
             } catch (e) {
+                // progressItem.setError(); // Method might not be available
+                progressItem.setText("Error: " + e.toString());
                 Zotero.alert(null, "Error", e.toString());
                 console.error(e);
-            } finally {
-                Zotero.hideZoteroPaneProgressMeter();
             }
         },
 
         checkMissingLinks: async function () {
             let s = new Zotero.Search();
-            s.addCondition('linkMode', 'is', 'linked_file');
             s.addCondition('itemType', 'is', 'attachment');
             let ids = await s.search();
             
@@ -59,10 +65,15 @@ if (!ZoteroFileManager.Logic) {
 
             for (let id of ids) {
                 let item = await Zotero.Items.getAsync(id);
-                let path = await item.getFilePathAsync();
                 
-                if (!path || !(await IOUtils.exists(path))) {
-                    missingItems.push(item);
+                // Check if item is a linked file
+                // Zotero.Attachments.LINK_MODE_LINKED_FILE = 2
+                // In Zotero 7, attachmentLinkMode is a getter on the item object
+                if (item.attachmentLinkMode === Zotero.Attachments.LINK_MODE_LINKED_FILE) {
+                     let path = await item.getFilePathAsync();
+                     if (!path || !(await IOUtils.exists(path))) {
+                        missingItems.push(item);
+                    }
                 }
             }
 
@@ -80,10 +91,9 @@ if (!ZoteroFileManager.Logic) {
             }
         },
 
-        checkDuplicates: async function () {
+        checkDuplicates: async function (progressItem) {
             let s = new Zotero.Search();
             s.addCondition('itemType', 'is', 'attachment');
-            s.addCondition('contentType', 'is', 'application/pdf'); 
             let ids = await s.search();
 
             let hashMap = {};
@@ -91,11 +101,14 @@ if (!ZoteroFileManager.Logic) {
 
             for (let id of ids) {
                 count++;
-                if (count % 50 === 0) {
-                    Zotero.updateZoteroPaneProgressMeter((count / ids.length) * 100);
+                if (count % 50 === 0 && progressItem) {
+                     progressItem.setText(`Checking file ${count} / ${ids.length}...`);
+                     progressItem.setProgress((count / ids.length) * 100);
                 }
 
                 let item = await Zotero.Items.getAsync(id);
+                if (item.attachmentContentType !== 'application/pdf') continue;
+                
                 let path = await item.getFilePathAsync();
 
                 if (path && (await IOUtils.exists(path))) {
