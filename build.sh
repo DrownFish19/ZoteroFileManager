@@ -2,7 +2,7 @@
 
 # Zotero Plugin Build Script
 PLUGIN_NAME="zotero-file-manager"
-FILES="manifest.json bootstrap.js content icon.png"
+FILES="manifest.json bootstrap.js content"
 
 # Remove old build
 rm -f ${PLUGIN_NAME}.xpi

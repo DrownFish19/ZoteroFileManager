@@ -3,21 +3,7 @@
   "name": "Zotero File Manager",
   "version": "1.0.0",
   "description": "A Zotero 7 plugin to manage missing linked files, find duplicates, and merge items.",
-  "author": "Your Name",
-  "applications": {
-    "zotero": {
-      "id": "drownfish19@gmail.com",
-      "update_url": "https://raw.githubusercontent.com/zhuweiguo/ZoteroFileManager/main/update.json",
-      "strict_min_version": "6.99"
-    },
-    "gecko": {
-      "id": "drownfish19@gmail.com",
-      "strict_min_version": "115.0"
-    }
-  },
-  "icons": {
-    "48": "icon.png"
-  },
+  "author": "drownfish19",
   "browser_specific_settings": {
     "gecko": {
       "id": "drownfish19@gmail.com",
@@ -25,7 +11,8 @@
     },
     "zotero": {
       "id": "drownfish19@gmail.com",
-      "strict_min_version": "6.99"
+      "strict_min_version": "6.99",
+      "update_url": "https://raw.githubusercontent.com/drownfish19/ZoteroFileManager/main/updates.json"
     }
   }
 }
