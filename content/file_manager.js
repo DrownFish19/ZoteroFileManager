@@ -51,7 +51,8 @@ if (!ZoteroFileManager.Logic) {
             } catch (e) {
                 // progressItem.setError(); // Method might not be available
                 progressItem.setText("Error: " + e.toString());
-                Zotero.alert(null, "Error", e.toString());
+                let win = Zotero.getMainWindow();
+                Services.prompt.alert(win, "Error", e.toString());
                 console.error(e);
             }
         },
@@ -73,21 +74,27 @@ if (!ZoteroFileManager.Logic) {
                      let path = await item.getFilePathAsync();
                      if (!path || !(await IOUtils.exists(path))) {
                         missingItems.push(item);
+                    } else {
+                        // If file exists but has 'zotero_file_manager:missing' tag, remove it
+                        if (item.hasTag('zotero_file_manager:missing')) {
+                            item.removeTag('zotero_file_manager:missing');
+                            await item.saveTx();
+                        }
                     }
                 }
             }
 
             if (missingItems.length > 0) {
-                let report = `Found ${missingItems.length} missing linked files.\nTagging them with 'available:missing'...`;
+                let report = `Found ${missingItems.length} missing linked files.\nTagging them with 'zotero_file_manager:missing'...`;
                 
-                await Zotero.DB.executeTransaction(async function () {
-                    for (let item of missingItems) {
-                        item.addTag('available:missing');
-                        await item.saveTx();
-                    }
-                });
+                // Remove large transaction to avoid timeouts
+                for (let item of missingItems) {
+                    item.addTag('zotero_file_manager:missing');
+                    await item.saveTx();
+                }
                 
-                Zotero.alert(null, "Missing Links Found", report);
+                let win = Zotero.getMainWindow();
+                Services.prompt.alert(win, "Missing Links Found", report);
             }
         },
 
@@ -104,11 +111,22 @@ if (!ZoteroFileManager.Logic) {
                 if (count % 50 === 0 && progressItem) {
                      progressItem.setText(`Checking file ${count} / ${ids.length}...`);
                      progressItem.setProgress((count / ids.length) * 100);
+                     // Allow UI updates
+                     await new Promise(resolve => setTimeout(resolve, 0));
                 }
 
                 let item = await Zotero.Items.getAsync(id);
-                if (item.attachmentContentType !== 'application/pdf') continue;
                 
+                // Only check PDFs and HTML files, or remove this check to check all files
+                // if (item.attachmentContentType !== 'application/pdf') continue;
+                
+                // Check and remove stale 'zotero_file_manager:duplicate' tag if it exists
+                // We will re-add it later if it's still a duplicate
+                if (item.hasTag('zotero_file_manager:duplicate')) {
+                    item.removeTag('zotero_file_manager:duplicate');
+                    await item.saveTx();
+                }
+
                 let path = await item.getFilePathAsync();
 
                 if (path && (await IOUtils.exists(path))) {
@@ -129,53 +147,37 @@ if (!ZoteroFileManager.Logic) {
             let duplicates = Object.values(hashMap).filter(list => list.length > 1);
             
             if (duplicates.length > 0) {
-                let shouldMerge = Zotero.confirm(
-                    null, 
+                let markedCount = 0;
+                
+                for (let group of duplicates) {
+                    // Sort by date added, keep the oldest one safe, tag others
+                    group.sort((a, b) => {
+                        if (a.dateAdded < b.dateAdded) return -1;
+                        if (a.dateAdded > b.dateAdded) return 1;
+                        return 0;
+                    });
+                    
+                    // Skip the first one (oldest), mark the rest
+                    for (let i = 1; i < group.length; i++) {
+                        let item = group[i];
+                        if (!item.hasTag('zotero_file_manager:duplicate')) {
+                            item.addTag('zotero_file_manager:duplicate');
+                            await item.saveTx();
+                            markedCount++;
+                        }
+                    }
+                }
+
+                let win = Zotero.getMainWindow();
+                Services.prompt.alert(
+                    win, 
                     "Duplicates Found", 
-                    `Found ${duplicates.length} sets of duplicate files.\nDo you want to attempt to merge parent items?`
+                    `Found ${duplicates.length} sets of duplicate files.\nMarked ${markedCount} items with 'zotero_file_manager:duplicate' tag.\nPlease review and process them manually.`
                 );
-
-                if (shouldMerge) {
-                    await this.mergeDuplicateParents(duplicates);
-                }
             } else {
-                Zotero.alert(null, "Check Complete", "No duplicate files found.");
+                let win = Zotero.getMainWindow();
+                Services.prompt.alert(win, "Check Complete", "No duplicate files found.");
             }
-        },
-
-        mergeDuplicateParents: async function (duplicateAttachmentsGroups) {
-            let mergeCount = 0;
-
-            await Zotero.DB.executeTransaction(async function () {
-                for (let group of duplicateAttachmentsGroups) {
-                    let parentIds = new Set();
-                    let parents = [];
-
-                    for (let att of group) {
-                        let pid = att.parentID;
-                        if (pid) {
-                            if (!parentIds.has(pid)) {
-                                parentIds.add(pid);
-                                parents.push(await Zotero.Items.getAsync(pid));
-                            }
-                        }
-                    }
-
-                    if (parents.length > 1) {
-                        let masterItem = parents[0];
-                        let otherItems = parents.slice(1);
-                        
-                        try {
-                            await Zotero.Items.merge(masterItem, otherItems);
-                            mergeCount++;
-                        } catch (e) {
-                            Zotero.logError("Merge failed: " + e);
-                        }
-                    }
-                }
-            });
-
-            Zotero.alert(null, "Merge Complete", `Merged ${mergeCount} duplicate item sets.`);
         }
     };
 }
